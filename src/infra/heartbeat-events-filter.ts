@@ -52,8 +52,9 @@ export function buildExecEventPrompt(
       : rawEventText;
   if (!eventText) {
     return (
-      "An async command completion event was triggered, but no command output was found. " +
-      "Reply HEARTBEAT_OK only. Do not mention, summarize, or reuse output from any earlier run."
+      "A command completion signal was received, but the actual result text is missing. " +
+      "Treat this as an exception-style event. If you must say anything to the user, briefly explain in natural Japanese that the command seems to have finished but the result content is not visible yet. " +
+      "Do not invent output, and do not use English fallback boilerplate. If no user-facing follow-up is needed, reply HEARTBEAT_OK only."
     );
   }
   if (!deliverToUser) {
@@ -67,7 +68,7 @@ export function buildExecEventPrompt(
     eventText +
     "\n\n" +
     "Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
-    "If it failed, explain what went wrong."
+    "If it failed, explain what went wrong. If the completion details are only a completion notice and do not include the real result text, do not fabricate details. Instead, briefly explain in natural Japanese that a completion notice arrived but the actual output is not visible yet. Keep the exception feel, but avoid raw internal wording and avoid English fallback boilerplate."
   );
 }
 

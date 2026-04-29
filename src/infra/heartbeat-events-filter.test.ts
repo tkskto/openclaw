@@ -54,6 +54,8 @@ describe("heartbeat event prompts", () => {
         "Uploaded file",
         "Please relay the command output to the user",
         "If it failed",
+        "natural Japanese",
+        "avoid English fallback boilerplate",
       ],
       unexpected: ["system messages above", "Handle the result internally"],
     },
@@ -72,8 +74,13 @@ describe("heartbeat event prompts", () => {
       name: "suppresses empty exec completion prompts",
       events: ["", "   "],
       opts: undefined,
-      expected: ["no command output was found", "Reply HEARTBEAT_OK only"],
-      unexpected: ["Please relay the command output to the user", "system messages above"],
+      expected: [
+        "actual result text is missing",
+        "exception-style event",
+        "natural Japanese",
+        "Reply HEARTBEAT_OK only",
+      ],
+      unexpected: ["Please relay the command output to the user", "system messages above", "no command output was found"],
     },
   ])("$name", ({ events, opts, expected, unexpected }) => {
     const prompt = buildExecEventPrompt(events, opts);
