@@ -223,7 +223,7 @@ describe("runCodexAppServerAttempt turn watches", () => {
     expect(result.itemLifecycle.completedCount).toBe(1);
     expect(result.promptTimeoutOutcome).toEqual({
       message:
-        "Codex stopped before confirming the turn was complete. Some work may already have been performed; verify the current state before retrying.",
+        "This turn may have stopped partway through after starting work. Check the current state before trying again.",
       replayInvalid: true,
       livenessState: "abandoned",
     });
@@ -272,7 +272,7 @@ describe("runCodexAppServerAttempt turn watches", () => {
     );
     expect(result.promptTimeoutOutcome).toEqual({
       message:
-        "Codex stopped before confirming the turn was complete. Some work may already have been performed; verify the current state before retrying.",
+        "This turn may have stopped partway through after starting work. Check the current state before trying again.",
       replayInvalid: true,
       livenessState: "abandoned",
     });
@@ -319,7 +319,7 @@ describe("runCodexAppServerAttempt turn watches", () => {
       }),
     ).toEqual({
       message:
-        "Codex stopped before confirming the turn was complete. Some work may already have been performed; verify the current state before retrying.",
+        "This turn may have stopped partway through after starting work. Check the current state before trying again.",
       replayInvalid: true,
       livenessState: "abandoned",
     });
@@ -358,7 +358,7 @@ describe("runCodexAppServerAttempt turn watches", () => {
     expect(result.itemLifecycle).toMatchObject({ activeCount: 1, completedCount: 0 });
     expect(result.promptTimeoutOutcome).toEqual({
       message:
-        "Codex stopped before confirming the turn was complete. Some work may already have been performed; verify the current state before retrying.",
+        "This turn may have stopped partway through after starting work. Check the current state before trying again.",
       replayInvalid: true,
       livenessState: "abandoned",
     });
@@ -399,7 +399,7 @@ describe("runCodexAppServerAttempt turn watches", () => {
     expect(result.toolMetas).toEqual([]);
     expect(result.promptTimeoutOutcome).toEqual({
       message:
-        "Codex stopped before confirming the turn was complete. The response may be incomplete; retry if needed.",
+        "This turn may have stopped partway through. The response could be incomplete; try again if needed.",
     });
   });
 

@@ -251,14 +251,18 @@ export function resolveDiscordReplyTarget(opts: {
   return opts.hasReplied ? undefined : replyToId;
 }
 
-export function sanitizeDiscordThreadName(rawName: string, fallbackId: string): string {
+export function sanitizeDiscordThreadName(
+  rawName: string,
+  fallbackId: string,
+  opts?: { preferNeutral?: boolean },
+): string {
   const cleanedName = rawName
     .replace(/<@!?\d+>/g, "")
     .replace(/<@&\d+>/g, "")
     .replace(/<#\d+>/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  const baseSource = cleanedName || `Thread ${fallbackId}`;
+  const baseSource = opts?.preferNeutral ? "Follow-up" : cleanedName || `Thread ${fallbackId}`;
   const base = truncateUtf16Safe(baseSource, 80);
   return truncateUtf16Safe(base, 100) || `Thread ${fallbackId}`;
 }

@@ -2,7 +2,11 @@
 import { StickerFormatType } from "discord-api-types/v10";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelType, type Client } from "../internal/discord.js";
-import { resetDiscordThreadStarterCacheForTest, resolveDiscordThreadStarter } from "./threading.js";
+import {
+  resetDiscordThreadStarterCacheForTest,
+  resolveDiscordThreadStarter,
+  sanitizeDiscordThreadName,
+} from "./threading.js";
 
 type ResolvedThreadStarter = NonNullable<Awaited<ReturnType<typeof resolveDiscordThreadStarter>>>;
 
@@ -276,5 +280,19 @@ describe("resolveDiscordThreadStarter", () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+describe("sanitizeDiscordThreadName", () => {
+  it("keeps normal user text readable", () => {
+    expect(sanitizeDiscordThreadName("Need help with deploy rollout", "msg1")).toBe(
+      "Need help with deploy rollout",
+    );
+  });
+
+  it("uses a neutral follow-up title when requested by the caller", () => {
+    expect(
+      sanitizeDiscordThreadName("Need help with deploy rollout", "msg1", { preferNeutral: true }),
+    ).toBe("Follow-up");
   });
 });

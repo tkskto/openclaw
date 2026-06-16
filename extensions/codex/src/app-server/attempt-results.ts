@@ -10,9 +10,9 @@ import type {
 import type { CodexSystemPromptReport } from "./attempt-context.js";
 
 const CODEX_APP_SERVER_MISSING_TERMINAL_EVENT_USER_MESSAGE =
-  "Codex stopped before confirming the turn was complete. The response may be incomplete; retry if needed.";
+  "This turn may have stopped partway through. The response could be incomplete; try again if needed.";
 const CODEX_APP_SERVER_MISSING_TERMINAL_EVENT_SIDE_EFFECT_USER_MESSAGE =
-  "Codex stopped before confirming the turn was complete. Some work may already have been performed; verify the current state before retrying.";
+  "This turn may have stopped partway through after starting work. Check the current state before trying again.";
 
 /** Joins terminal assistant text blocks into the final attempt answer. */
 export function collectTerminalAssistantText(result: EmbeddedRunAttemptResult): string {

@@ -148,7 +148,9 @@ export async function maybeCreateDiscordAutoThread(
   }
   try {
     const rawThreadSource = params.baseText || params.combinedBody || "Thread";
-    const threadName = sanitizeDiscordThreadName(rawThreadSource, params.message.id);
+    const threadName = sanitizeDiscordThreadName(rawThreadSource, params.message.id, {
+      preferNeutral: params.preferNeutralThreadName,
+    });
     const archiveDuration = params.channelConfig?.autoArchiveDuration
       ? Number(params.channelConfig.autoArchiveDuration)
       : 60;
@@ -184,7 +186,7 @@ export async function maybeCreateDiscordAutoThread(
         threadId: createdId,
         currentName: threadName,
         fallbackId: params.message.id,
-        sourceText: rawThreadSource,
+        sourceText: params.preferNeutralThreadName ? "" : rawThreadSource,
         modelRef,
         channelName: params.channelName,
         channelDescription: params.channelDescription,
@@ -263,6 +265,9 @@ async function maybeRenameDiscordAutoThread(params: {
   agentId: string;
 }): Promise<void> {
   try {
+    if (!params.sourceText.trim()) {
+      return;
+    }
     const fallbackName = sanitizeDiscordThreadName("", params.fallbackId);
     const generated = await generateThreadTitle({
       cfg: params.cfg,

@@ -319,6 +319,30 @@ describe("maybeCreateDiscordAutoThread autoThreadName", () => {
     expect(patchMock).not.toHaveBeenCalled();
   });
 
+  it("uses a neutral thread name and skips title generation for internal failure text", async () => {
+    postMock.mockResolvedValueOnce({ id: "thread1" });
+
+    const cfg = { agents: { defaults: { model: "anthropic/claude-opus-4-6" } } } as OpenClawConfig;
+    const result = await maybeCreateDiscordAutoThread(
+      createBaseParams({
+        baseText:
+          "This turn may have stopped partway through after starting work. Check the current state before trying again.",
+        combinedBody:
+          "This turn may have stopped partway through after starting work. Check the current state before trying again.",
+        preferNeutralThreadName: true,
+        channelConfig: { allowed: true, autoThread: true, autoThreadName: "generated" },
+        cfg,
+        agentId: "main",
+      }),
+    );
+
+    expect(result).toBe("thread1");
+    expectRestBodyField(postMock, "name", "Follow-up");
+    await flushAsyncWork();
+    expect(generateThreadTitleMock).not.toHaveBeenCalled();
+    expect(patchMock).not.toHaveBeenCalled();
+  });
+
   it("skips thread creation when autoThread is false", async () => {
     const result = await maybeCreateDiscordAutoThread(
       createBaseParams({

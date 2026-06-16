@@ -98,6 +98,7 @@ export type MaybeCreateDiscordAutoThreadParams = {
   channelDescription?: string;
   baseText: string;
   combinedBody: string;
+  preferNeutralThreadName?: boolean;
   cfg: OpenClawConfig;
   agentId?: string;
 };

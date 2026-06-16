@@ -276,6 +276,7 @@ export async function buildDiscordMessageProcessContext(params: {
     channelDescription: channelInfo?.topic,
     baseText: baseText ?? "",
     combinedBody,
+    preferNeutralThreadName: Boolean(author.bot) && !sender.isPluralKit,
     replyToMode,
     agentId: route.agentId,
     channel: route.channel,
