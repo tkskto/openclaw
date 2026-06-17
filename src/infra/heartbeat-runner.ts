@@ -20,6 +20,7 @@ import {
 } from "../agents/agent-scope.js";
 import { appendCronStyleCurrentTimeLine } from "../agents/current-time.js";
 import { resolveEmbeddedSessionLane } from "../agents/embedded-agent-runner/lanes.js";
+import { listActiveEmbeddedRunSessionKeys } from "../agents/embedded-agent-runner/run-state.js";
 import { formatReasoningMessage } from "../agents/embedded-agent-utils.js";
 import { resolveAgentHarnessPolicy } from "../agents/harness/policy.js";
 import { resolveModelRefFromString, type ModelRef } from "../agents/model-selection.js";
@@ -43,6 +44,10 @@ import {
 } from "../auto-reply/heartbeat.js";
 import { replaceGenericExternalRunFailureText } from "../auto-reply/reply/agent-runner-failure-copy.js";
 import { resolveDefaultModel } from "../auto-reply/reply/directive-handling.defaults.js";
+import {
+  REPLY_OPERATION_RUN_STATE,
+  type ReplyOperationRunState,
+} from "../auto-reply/reply/reply-operation-run-state.js";
 import {
   listActiveReplyRunSessionKeys,
   replyRunRegistry,
@@ -74,6 +79,7 @@ import {
 import { resolveStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore } from "../config/sessions/store-load.js";
 import { archiveRemovedSessionTranscripts, updateSessionStore } from "../config/sessions/store.js";
+import { streamSessionTranscriptLinesReverse } from "../config/sessions/transcript-stream.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -155,6 +161,7 @@ export type HeartbeatDeps = OutboundSendDeps &
     getCommandLaneSnapshots?: () => readonly CommandLaneSnapshot[];
     isReplyRunActive?: (sessionKey: string) => boolean;
     listActiveReplyRunSessionKeys?: () => readonly string[];
+    listActiveEmbeddedRunSessionKeys?: () => readonly string[];
     nowMs?: () => number;
   };
 
@@ -229,15 +236,20 @@ function hasAgentOptInBusyLaneWork(
   return hasQueuedWorkInLaneSnapshots(getSnapshots(), (lane) => laneBelongsToAgent(lane, agentId));
 }
 
-function hasActiveReplyRunForAgent(
-  agentId: string,
-  listSessionKeys: () => readonly string[],
-): boolean {
+function hasActiveRunForAgent(agentId: string, listSessionKeys: () => readonly string[]): boolean {
   const normalizedAgentId = normalizeAgentId(agentId);
   return listSessionKeys().some((sessionKey) => {
     const parsed = parseAgentSessionKey(sessionKey);
     return parsed ? normalizeAgentId(parsed.agentId) === normalizedAgentId : false;
   });
+}
+
+function hasActiveRunForSession(
+  sessionKey: string,
+  listSessionKeys: () => readonly string[],
+): boolean {
+  const normalizedSessionKey = sessionKey.trim();
+  return Boolean(normalizedSessionKey) && listSessionKeys().includes(normalizedSessionKey);
 }
 
 function resolveHeartbeatChannelPlugin(channel: string): ChannelPlugin | undefined {
@@ -1160,6 +1172,95 @@ function appendHeartbeatFileDirectives(prompt: string, heartbeatFileContent?: st
   return `${prompt}\n\nAdditional context from HEARTBEAT.md:\n${directives}`;
 }
 
+function extractTranscriptTextContent(content: unknown): string | undefined {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const candidate = block as { type?: unknown; text?: unknown };
+    if (candidate.type === "text" && typeof candidate.text === "string" && candidate.text.trim()) {
+      parts.push(candidate.text.trim());
+    }
+  }
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+function normalizeHeartbeatRecentMessage(text: string, maxChars = 180): string | undefined {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) {
+    return undefined;
+  }
+  const stripped = stripHeartbeatToken(collapsed, { mode: "heartbeat" });
+  if (stripped.shouldSkip) {
+    return undefined;
+  }
+  const visible = stripped.didStrip ? stripped.text : collapsed;
+  if (!visible) {
+    return undefined;
+  }
+  return visible.length > maxChars ? `${visible.slice(0, maxChars - 1)}…` : visible;
+}
+
+async function listRecentVisibleAssistantMessages(params: {
+  sessionFile?: string;
+  limit?: number;
+}): Promise<string[]> {
+  const sessionFile = normalizeOptionalString(params.sessionFile);
+  if (!sessionFile) {
+    return [];
+  }
+  const limit = Math.max(1, params.limit ?? 2);
+  const recent: string[] = [];
+  const seen = new Set<string>();
+  for await (const line of streamSessionTranscriptLinesReverse(sessionFile)) {
+    try {
+      const entry = JSON.parse(line) as {
+        type?: unknown;
+        message?: { role?: unknown; content?: unknown };
+      };
+      if (entry.type !== "message" || entry.message?.role !== "assistant") {
+        continue;
+      }
+      const text = extractTranscriptTextContent(entry.message.content);
+      if (!text) {
+        continue;
+      }
+      const normalized = normalizeHeartbeatRecentMessage(text);
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      recent.push(normalized);
+      if (recent.length >= limit) {
+        break;
+      }
+    } catch {
+      // Ignore malformed transcript rows.
+    }
+  }
+  return recent;
+}
+
+function appendRecentAssistantMessageContext(prompt: string, messages: readonly string[]): string {
+  if (messages.length === 0) {
+    return prompt;
+  }
+  const bullets = messages.map((message) => `- ${message}`).join("\n");
+  return (
+    `${prompt}\n\n` +
+    "Recent visible assistant messages in this session (newest first). " +
+    "Before posting, compare against these and avoid repeating the same update unless you have materially new information:\n" +
+    `${bullets}`
+  );
+}
+
 function resolveHeartbeatRunPrompt(params: {
   cfg: OpenClawConfig;
   heartbeat?: HeartbeatConfig;
@@ -1169,6 +1270,7 @@ function resolveHeartbeatRunPrompt(params: {
   startedAt: number;
   dueTasks: HeartbeatTask[];
   heartbeatFileContent?: string;
+  recentAssistantMessages?: readonly string[];
   useHeartbeatResponseTool: boolean;
 }): HeartbeatPromptResolution {
   const pendingEventEntries = params.preflight.pendingEventEntries;
@@ -1207,7 +1309,10 @@ function resolveHeartbeatRunPrompt(params: {
 ${taskList}
 
 ${completionInstruction}`;
-      const prompt = appendHeartbeatFileDirectives(taskListPrompt, params.heartbeatFileContent);
+      const prompt = appendRecentAssistantMessageContext(
+        appendHeartbeatFileDirectives(taskListPrompt, params.heartbeatFileContent),
+        params.recentAssistantMessages ?? [],
+      );
       return {
         prompt,
         hasExecCompletion: false,
@@ -1219,7 +1324,10 @@ ${completionInstruction}`;
     }
     if (commitmentPrompt) {
       return {
-        prompt: appendHeartbeatFileDirectives(commitmentPrompt, params.heartbeatFileContent),
+        prompt: appendRecentAssistantMessageContext(
+          appendHeartbeatFileDirectives(commitmentPrompt, params.heartbeatFileContent),
+          params.recentAssistantMessages ?? [],
+        ),
         hasExecCompletion: false,
         hasRelayableExecCompletion: false,
         hasCronEvents: false,
@@ -1256,9 +1364,12 @@ ${completionInstruction}`;
     basePromptWithHint,
     params.heartbeatFileContent,
   );
-  const prompt = commitmentPrompt
-    ? `${basePromptWithDirectives}\n\n${commitmentPrompt}`
-    : basePromptWithDirectives;
+  const prompt = appendRecentAssistantMessageContext(
+    commitmentPrompt
+      ? `${basePromptWithDirectives}\n\n${commitmentPrompt}`
+      : basePromptWithDirectives,
+    params.recentAssistantMessages ?? [],
+  );
 
   return {
     prompt,
@@ -1358,10 +1469,16 @@ export async function runHeartbeatOnce(opts: {
   const shouldHonorActiveReplyRuns = opts.intent !== "immediate" && opts.intent !== "manual";
   const listActiveReplyRuns =
     opts.deps?.listActiveReplyRunSessionKeys ?? listActiveReplyRunSessionKeys;
+  const listActiveEmbeddedRuns =
+    opts.deps?.listActiveEmbeddedRunSessionKeys ?? listActiveEmbeddedRunSessionKeys;
   // Scheduled heartbeats are background work, so defer them when any session on
   // the same agent is already replying; immediate/manual wakes keep their
   // existing semantics for explicit user/system actions.
-  if (shouldHonorActiveReplyRuns && hasActiveReplyRunForAgent(agentId, listActiveReplyRuns)) {
+  if (
+    shouldHonorActiveReplyRuns &&
+    (hasActiveRunForAgent(agentId, listActiveReplyRuns) ||
+      hasActiveRunForAgent(agentId, listActiveEmbeddedRuns))
+  ) {
     emitHeartbeatEvent({
       status: "skipped",
       reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
@@ -1417,7 +1534,7 @@ export async function runHeartbeatOnce(opts: {
   const { entry, sessionKey, storePath, suppressOriginatingContext } = preflight.session;
   const isReplyRunActive =
     opts.deps?.isReplyRunActive ?? ((key: string) => replyRunRegistry.isActive(key));
-  if (isReplyRunActive(sessionKey)) {
+  if (isReplyRunActive(sessionKey) || hasActiveRunForSession(sessionKey, listActiveEmbeddedRuns)) {
     emitHeartbeatEvent({
       status: "skipped",
       reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
@@ -1519,6 +1636,10 @@ export async function runHeartbeatOnce(opts: {
     entry,
     chatType: delivery.chatType,
   });
+  const recentAssistantMessages = await listRecentVisibleAssistantMessages({
+    sessionFile: entry?.sessionFile,
+    limit: 2,
+  });
   const {
     prompt,
     hasExecCompletion,
@@ -1535,6 +1656,7 @@ export async function runHeartbeatOnce(opts: {
     startedAt,
     dueTasks: dueHeartbeatTasks,
     heartbeatFileContent: preflight.heartbeatFileContent,
+    recentAssistantMessages,
     useHeartbeatResponseTool: useHeartbeatResponseToolPrompt,
   });
   const dueCommitmentIds = hasDueCommitments
@@ -1559,6 +1681,7 @@ export async function runHeartbeatOnce(opts: {
   }
 
   let runSessionKey = sessionKey;
+  let outboundPolicySessionKey: string | undefined;
   if (useIsolatedSession) {
     const configuredSession = resolveHeartbeatSession(cfg, agentId, heartbeat);
     // Collapse only the repeated `:heartbeat` suffixes introduced by wake-triggered
@@ -1575,7 +1698,10 @@ export async function runHeartbeatOnce(opts: {
       isolatedSessionKey,
       isolatedBaseSessionKey,
     });
-    if (isReplyRunActive(isolatedSessionKey)) {
+    if (
+      isReplyRunActive(isolatedSessionKey) ||
+      hasActiveRunForSession(isolatedSessionKey, listActiveEmbeddedRuns)
+    ) {
       emitHeartbeatEvent({
         status: "skipped",
         reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
@@ -1628,6 +1754,7 @@ export async function runHeartbeatOnce(opts: {
       }
     }
     runSessionKey = isolatedSessionKey;
+    outboundPolicySessionKey = isolatedBaseSessionKey;
   }
   // Update task last run times AFTER successful heartbeat completion
   const updateTaskTimestamps = async () => {
@@ -1707,7 +1834,8 @@ export async function runHeartbeatOnce(opts: {
   const outboundSession = buildOutboundSessionContext({
     cfg,
     agentId,
-    sessionKey,
+    sessionKey: runSessionKey,
+    policySessionKey: outboundPolicySessionKey,
   });
   const canAttemptHeartbeatOk = Boolean(
     !hasDueCommitments && visibility.showOk && delivery.channel !== "none" && delivery.to,
@@ -1778,8 +1906,10 @@ export async function runHeartbeatOnce(opts: {
     const timeoutOverrideSeconds = resolveHeartbeatTimeoutOverrideSeconds(cfg, heartbeat);
     const bootstrapContextMode: "lightweight" | undefined =
       heartbeat?.lightContext === true ? "lightweight" : undefined;
+    const replyOperationRunState: ReplyOperationRunState = {};
     const replyOpts = {
       isHeartbeat: true,
+      [REPLY_OPERATION_RUN_STATE]: replyOperationRunState,
       ...(heartbeatModelOverride ? { heartbeatModelOverride } : {}),
       suppressToolErrorWarnings,
       ...(usesHeartbeatResponseTool ? { enableHeartbeatTool: true, forceHeartbeatTool: true } : {}),
@@ -1797,6 +1927,19 @@ export async function runHeartbeatOnce(opts: {
     const replyResult = await getReplyFromConfig(ctx, replyOpts, cfg);
     const heartbeatToolResponse = resolveHeartbeatToolResponseFromReplyResult(replyResult);
     const replyPayload = resolveHeartbeatReplyPayload(replyResult);
+    if (
+      !heartbeatToolResponse &&
+      (!replyPayload || !hasOutboundReplyContent(replyPayload)) &&
+      replyOperationRunState.admission?.status === "skipped" &&
+      replyOperationRunState.admission.reason === "active-run"
+    ) {
+      emitHeartbeatEvent({
+        status: "skipped",
+        reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
+        durationMs: Date.now() - startedAt,
+      });
+      return { status: "skipped", reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT };
+    }
     const includeReasoning = heartbeat?.includeReasoning === true;
     const reasoningPayloads = includeReasoning
       ? resolveHeartbeatReasoningPayloads(replyResult).filter((payload) => payload !== replyPayload)
@@ -2057,15 +2200,20 @@ export async function runHeartbeatOnce(opts: {
     if (send.status === "failed" || send.status === "partial_failed") {
       throw send.error;
     }
-    await markCommitmentsStatus({
-      cfg,
-      ids: dueCommitmentIds,
-      status: shouldSkipMain ? "dismissed" : "sent",
-      nowMs: startedAt,
-    });
+    const visibleSendSucceeded = send.status === "sent";
+    // Suppressed durable sends committed no visible channel message. Keep due
+    // commitments and heartbeat dedupe state active so a later heartbeat can retry.
+    if (shouldSkipMain || visibleSendSucceeded) {
+      await markCommitmentsStatus({
+        cfg,
+        ids: dueCommitmentIds,
+        status: shouldSkipMain ? "dismissed" : "sent",
+        nowMs: startedAt,
+      });
+    }
 
     // Record last delivered heartbeat payload for dedupe.
-    if (!shouldSkipMain && normalized.text.trim()) {
+    if (visibleSendSucceeded && !shouldSkipMain && normalized.text.trim()) {
       await updateSessionStore(storePath, (store) => {
         const current = store[sessionKey];
         if (!current) {
@@ -2079,17 +2227,22 @@ export async function runHeartbeatOnce(opts: {
       });
     }
 
-    const sentStatus = deliveredAgentRunFailure ? "failed" : "sent";
+    const eventStatus = deliveredAgentRunFailure
+      ? "failed"
+      : visibleSendSucceeded
+        ? "sent"
+        : "skipped";
     emitHeartbeatEvent({
-      status: sentStatus,
+      status: eventStatus,
       to: delivery.to,
       ...(deliveredAgentRunFailure ? { reason: "agent-runner-failure" } : {}),
+      ...(!deliveredAgentRunFailure && !visibleSendSucceeded ? { reason: send.reason } : {}),
       preview: previewText?.slice(0, 200),
       durationMs: Date.now() - startedAt,
       hasMedia: mediaUrls.length > 0,
       channel: delivery.channel,
       accountId: delivery.accountId,
-      indicatorType: visibility.useIndicator ? resolveIndicatorType(sentStatus) : undefined,
+      indicatorType: visibility.useIndicator ? resolveIndicatorType(eventStatus) : undefined,
     });
     await updateTaskTimestamps();
     consumeInspectedSystemEvents();

@@ -23,6 +23,16 @@ describe("subscribeEmbeddedAgentSession", () => {
     expect(onBlockReply).toHaveBeenCalledTimes(1);
     expect(subscription.assistantTexts).toEqual(["Hello block"]);
   });
+  it("does not emit duplicate block replies when repeated text only changes spacing", async () => {
+    const onBlockReply = vi.fn();
+    const { emit } = createTextEndBlockReplyHarness({ onBlockReply });
+
+    emitAssistantTextDelta({ emit, delta: "Hello  world" });
+    emitAssistantTextEnd({ emit, content: "Hello world" });
+    await Promise.resolve();
+
+    expect(onBlockReply).toHaveBeenCalledTimes(1);
+  });
   it("does not duplicate assistantTexts when message_end repeats", () => {
     const { session, emit } = createStubSessionHarness();
 

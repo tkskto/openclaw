@@ -61,14 +61,25 @@ describe("Codex app-server attempt results", () => {
       buildCodexAppServerPromptTimeoutOutcome({
         result: createResult(),
         turnCompletionIdleTimedOut: true,
+        turnWatchTimeoutKind: "progress",
       }),
     ).toBeUndefined();
     expect(
       buildCodexAppServerPromptTimeoutOutcome({
         result: createResult({
-          itemLifecycle: { startedCount: 1, completedCount: 1, activeCount: 0 },
+          toolMetas: [{ toolName: "exec" }],
         }),
         turnCompletionIdleTimedOut: true,
+        turnWatchTimeoutKind: "terminal",
+      }),
+    ).toBeUndefined();
+    expect(
+      buildCodexAppServerPromptTimeoutOutcome({
+        result: createResult({
+          itemLifecycle: { startedCount: 0, completedCount: 0, activeCount: 0 },
+        }),
+        turnCompletionIdleTimedOut: true,
+        turnWatchTimeoutKind: "completion",
       }),
     ).toEqual({
       message:
@@ -83,6 +94,7 @@ describe("Codex app-server attempt results", () => {
           },
         }),
         turnCompletionIdleTimedOut: true,
+        turnWatchTimeoutKind: "completion",
       }),
     ).toEqual({
       message:
@@ -96,10 +108,13 @@ describe("Codex app-server attempt results", () => {
           assistantTexts: ["I am changing the data model now..."],
         }),
         turnCompletionIdleTimedOut: true,
+        turnWatchTimeoutKind: "completion",
       }),
     ).toEqual({
       message:
         "This turn may have stopped partway through. The response could be incomplete; try again if needed.",
+      replayInvalid: true,
+      livenessState: "abandoned",
     });
     expect(
       buildCodexAppServerPromptTimeoutOutcome({
@@ -107,10 +122,13 @@ describe("Codex app-server attempt results", () => {
           toolMetas: [{ toolName: "exec" }],
         }),
         turnCompletionIdleTimedOut: true,
+        turnWatchTimeoutKind: "completion",
       }),
     ).toEqual({
       message:
-        "This turn may have stopped partway through. The response could be incomplete; try again if needed.",
+        "This turn may have stopped partway through after starting work. Check the current state before trying again.",
+      replayInvalid: true,
+      livenessState: "abandoned",
     });
   });
 

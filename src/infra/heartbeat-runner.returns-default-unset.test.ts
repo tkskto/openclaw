@@ -706,6 +706,7 @@ describe("runHeartbeatOnce", () => {
     options?: {
       nowMs?: number;
       getReplyFromConfig?: HeartbeatDeps["getReplyFromConfig"];
+      listActiveEmbeddedRunSessionKeys?: HeartbeatDeps["listActiveEmbeddedRunSessionKeys"];
     },
   ): HeartbeatDeps => ({
     whatsapp: sendWhatsApp,
@@ -714,6 +715,9 @@ describe("runHeartbeatOnce", () => {
     webAuthExists: async () => true,
     hasActiveWebListener: () => true,
     ...(options?.getReplyFromConfig ? { getReplyFromConfig: options.getReplyFromConfig } : null),
+    ...(options?.listActiveEmbeddedRunSessionKeys
+      ? { listActiveEmbeddedRunSessionKeys: options.listActiveEmbeddedRunSessionKeys }
+      : null),
   });
 
   it("skips when agent heartbeat is not enabled", async () => {
@@ -729,6 +733,33 @@ describe("runHeartbeatOnce", () => {
     if (res.status === "skipped") {
       expect(res.reason).toBe("disabled");
     }
+  });
+
+  it.each([
+    ["the heartbeat main session", (cfg: OpenClawConfig) => resolveMainSessionKey(cfg)],
+    ["another session for the same agent", () => "agent:main:telegram:alerts"],
+  ])("retries instead of dispatching while %s has an embedded run", async (_name, activeKey) => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          heartbeat: { every: "5m", target: "none" },
+        },
+      },
+    };
+    const replySpy = vi.fn().mockResolvedValue({ text: "heartbeat reply" });
+    const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+    const res = await runHeartbeatOnce({
+      cfg,
+      deps: createHeartbeatDeps(sendWhatsApp, {
+        getReplyFromConfig: replySpy,
+        listActiveEmbeddedRunSessionKeys: () => [activeKey(cfg)],
+      }),
+    });
+
+    expect(res).toEqual({ status: "skipped", reason: "requests-in-flight" });
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(sendWhatsApp).not.toHaveBeenCalled();
   });
 
   it("skips outside active hours", async () => {
@@ -1536,6 +1567,76 @@ describe("runHeartbeatOnce", () => {
     } finally {
       replySpy.mockRestore();
     }
+  });
+
+  it("includes recent visible assistant messages even when heartbeat uses an isolated session", async () => {
+    const tmpDir = await createCaseDir("openclaw-hb-recent-assistant-context");
+    const storePath = path.join(tmpDir, "sessions.json");
+    const workspaceDir = path.join(tmpDir, "workspace");
+    const sessionFile = path.join(tmpDir, "session.jsonl");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "HEARTBEAT.md"),
+      "- Check for anything urgent.\n",
+      "utf-8",
+    );
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: "message",
+          message: { role: "assistant", content: "HEARTBEAT_OK" },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: "I already posted the release summary in this channel.",
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+          heartbeat: { every: "5m", target: "whatsapp", isolatedSession: true },
+        },
+      },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+      session: { store: storePath },
+    };
+    await fs.writeFile(
+      storePath,
+      JSON.stringify({
+        [resolveMainSessionKey(cfg)]: {
+          sessionId: "sid",
+          sessionFile,
+          updatedAt: Date.now(),
+          lastChannel: "whatsapp",
+          lastTo: "120363401234567890@g.us",
+        },
+      }),
+    );
+    const replySpy = vi.fn().mockResolvedValue({ text: "Checked." });
+    const sendWhatsApp = vi
+      .fn<
+        (to: string, text: string, opts?: unknown) => Promise<{ messageId: string; toJid: string }>
+      >()
+      .mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+    const res = await runHeartbeatOnce({
+      cfg,
+      deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+    });
+
+    expect(res.status).toBe("ran");
+    const calledCtx = replyBody(replySpy);
+    expect(calledCtx.Body).toContain("Recent visible assistant messages in this session");
+    expect(calledCtx.Body).toContain("I already posted the release summary in this channel.");
+    expect(calledCtx.Body).not.toContain("- HEARTBEAT_OK");
   });
 
   it("keeps non-task HEARTBEAT.md context while stripping blank-line-separated task blocks", async () => {
