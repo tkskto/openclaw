@@ -5,6 +5,7 @@
  * so local tools can attach to the same browser runtime without racing owners.
  */
 import type { Server } from "node:http";
+import { runAttachEnsureScript } from "./browser/attach-target-ensure.js";
 import { createBrowserRuntimeState, stopBrowserRuntime } from "./browser/runtime-lifecycle.js";
 import { type BrowserServerState, createBrowserRouteContext } from "./browser/server-context.js";
 
@@ -21,6 +22,7 @@ export function getBrowserControlState(): BrowserServerState | null {
 export function createBrowserControlContext() {
   return createBrowserRouteContext({
     getState: () => state,
+    onEnsureAttachTarget: runAttachEnsureScript,
     refreshConfigFromDisk: true,
   });
 }
