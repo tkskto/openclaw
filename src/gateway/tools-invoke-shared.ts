@@ -9,6 +9,10 @@ import { resolveToolLoopDetectionConfig } from "../agents/agent-tools.js";
 import { getChannelAgentToolMeta } from "../agents/channel-tools.js";
 import { isKnownCoreToolId } from "../agents/tool-catalog.js";
 import { ToolInputError, type AnyAgentTool } from "../agents/tools/common.js";
+import {
+  normalizeConversationReadInvocationOrigin,
+  type ConversationReadInvocationOrigin,
+} from "../channels/plugins/conversation-read-origin.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
@@ -155,9 +159,14 @@ export async function invokeGatewayTool(params: {
   agentTo?: string;
   agentThreadId?: string;
   senderIsOwner?: boolean;
+  clientCaps?: string[];
+  conversationReadOrigin?: ConversationReadInvocationOrigin;
   toolCallIdPrefix: string;
   approvalMode?: "request" | "report";
 }): Promise<ToolsInvokeOutcome> {
+  const conversationReadOrigin = normalizeConversationReadInvocationOrigin(
+    params.conversationReadOrigin,
+  );
   const toolName = normalizeOptionalString(params.input.name ?? params.input.tool) ?? "";
   if (!toolName) {
     return {
@@ -205,6 +214,8 @@ export async function invokeGatewayTool(params: {
       agentTo: params.agentTo,
       agentThreadId: params.agentThreadId,
       senderIsOwner: params.senderIsOwner,
+      clientCaps: params.clientCaps,
+      conversationReadOrigin,
       allowGatewaySubagentBinding: true,
       allowMediaInvokeCommands: true,
       surface: "http",
@@ -212,9 +223,9 @@ export async function invokeGatewayTool(params: {
       gatewayRequestedTools,
     });
 
-  let { agentId, tools } = resolveTools(knownCoreTool);
+  let { agentId, tools, workspaceDir } = resolveTools(knownCoreTool);
   if (knownCoreTool && !tools.some((candidate) => candidate.name === toolName)) {
-    ({ agentId, tools } = resolveTools(false));
+    ({ agentId, tools, workspaceDir } = resolveTools(false));
   }
   const requestedAgentId = normalizeOptionalString(params.input.agentId);
   if (requestedAgentId && agentId && requestedAgentId !== agentId) {
@@ -242,8 +253,8 @@ export async function invokeGatewayTool(params: {
     const gatewayTool: AnyAgentTool = tool;
     const idempotencyKey = normalizeOptionalString(params.input.idempotencyKey);
     const toolCallId = idempotencyKey
-      ? `${params.toolCallIdPrefix}-${idempotencyKey}`
-      : `${params.toolCallIdPrefix}-${Date.now()}`;
+      ? `${params.toolCallIdPrefix}-${conversationReadOrigin}-${idempotencyKey}`
+      : `${params.toolCallIdPrefix}-${conversationReadOrigin}-${Date.now()}`;
     const toolArgs = mergeActionIntoArgsIfSupported({
       toolSchema: gatewayTool.parameters,
       action,
@@ -257,6 +268,7 @@ export async function invokeGatewayTool(params: {
         agentId,
         config: params.cfg,
         sessionKey,
+        workspaceDir,
         loopDetection: resolveToolLoopDetectionConfig({ cfg: params.cfg, agentId }),
       },
       approvalMode: params.approvalMode,

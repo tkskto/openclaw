@@ -10,8 +10,11 @@ export type BrowserProfileConfig = {
   mcpCommand?: string;
   /** Extra Chrome MCP arguments for existing-session profiles. */
   mcpArgs?: string[];
-  /** Profile driver (default: openclaw). */
-  driver?: "openclaw" | "clawd" | "existing-session";
+  /**
+   * Profile driver (default: openclaw). "extension" attaches to the user's
+   * signed-in browser through the OpenClaw Chrome extension relay.
+   */
+  driver?: "openclaw" | "clawd" | "existing-session" | "extension";
   /** If true, launch this profile in headless mode. Falls back to browser.headless. */
   headless?: boolean;
   /** Browser executable path for this profile. Falls back to browser.executablePath. */
@@ -51,13 +54,15 @@ export type BrowserSsrFPolicyConfig = {
 };
 export type BrowserConfig = {
   enabled?: boolean;
+  /** Allow importing cookies from the user's real Chrome-family profile into a managed profile (macOS). Default: true. */
+  allowSystemProfileImport?: boolean;
   /** If false, disable browser act:evaluate (arbitrary JS). Default: true */
   evaluateEnabled?: boolean;
   /** Base URL of the CDP endpoint (for remote browsers). Default: loopback CDP on the derived port. */
   cdpUrl?: string;
-  /** Remote CDP HTTP timeout (ms). Default: 1500. */
+  /** Remote CDP HTTP timeout and persistent tab-enumeration budget input (ms). Default: 1500. */
   remoteCdpTimeoutMs?: number;
-  /** Remote CDP WebSocket handshake timeout (ms). Default: max(remoteCdpTimeoutMs * 2, 2000). */
+  /** Remote CDP handshake timeout and tab-enumeration budget input (ms). Default: max(remoteCdpTimeoutMs * 2, 2000). */
   remoteCdpHandshakeTimeoutMs?: number;
   /** Local managed browser launch discovery timeout (ms). Default: 15000. */
   localLaunchTimeoutMs?: number;

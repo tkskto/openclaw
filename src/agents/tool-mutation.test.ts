@@ -187,6 +187,58 @@ describe("tool mutation helpers", () => {
     ).toBe(true);
   });
 
+  it("classifies computer observations as replay-safe and input as mutating", () => {
+    for (const action of ["screenshot", "wait"]) {
+      const state = buildToolMutationState("computer", { action });
+      expect(state.mutatingAction, action).toBe(false);
+      expect(state.replaySafe, action).toBe(true);
+      expect(state.actionFingerprint, action).toBeUndefined();
+    }
+    for (const action of [
+      "left_click",
+      "right_click",
+      "middle_click",
+      "double_click",
+      "triple_click",
+      "mouse_move",
+      "left_click_drag",
+      "left_mouse_down",
+      "left_mouse_up",
+      "scroll",
+      "type",
+      "key",
+      "hold_key",
+    ]) {
+      const state = buildToolMutationState("computer", { action });
+      expect(state.mutatingAction, action).toBe(true);
+      expect(state.replaySafe, action).toBe(false);
+      expect(state.actionFingerprint, action).toBe(`tool=computer|action=${action}`);
+    }
+    expect(isMutatingToolCall("computer", {})).toBe(true);
+    expect(isReplaySafeToolCall("computer", {})).toBe(false);
+  });
+
+  it("keeps computer input fingerprints stable and target-specific", () => {
+    const first = buildToolMutationState(
+      "computer",
+      { action: "left_click", coordinate: [10, 20], node: "desk" },
+      "left_click 10,20 desk",
+    ).actionFingerprint;
+    const repeat = buildToolMutationState(
+      "computer",
+      { action: "left_click", coordinate: [10, 20], node: "desk" },
+      "left_click 10,20 desk",
+    ).actionFingerprint;
+    const otherTarget = buildToolMutationState(
+      "computer",
+      { action: "left_click", coordinate: [30, 40], node: "desk" },
+      "left_click 30,40 desk",
+    ).actionFingerprint;
+
+    expect(first).toBe(repeat);
+    expect(first).not.toBe(otherTarget);
+  });
+
   it("fails closed for replay unless the structured tool contract is read-only", () => {
     for (const toolName of [
       "agents_list",
@@ -424,6 +476,7 @@ describe("tool mutation helpers", () => {
   it("keeps legacy name-only mutating heuristics for payload fallback", () => {
     expect(isLikelyMutatingToolName("sessions_spawn")).toBe(true);
     expect(isLikelyMutatingToolName("sessions_send")).toBe(true);
+    expect(isLikelyMutatingToolName("computer")).toBe(true);
     expect(isLikelyMutatingToolName("browser_actions")).toBe(true);
     expect(isLikelyMutatingToolName("message_slack")).toBe(true);
     expect(isLikelyMutatingToolName("browser")).toBe(false);

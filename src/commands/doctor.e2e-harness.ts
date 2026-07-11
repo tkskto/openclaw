@@ -144,6 +144,12 @@ const autoMigrateLegacyState = vi.fn().mockResolvedValue({
   changes: [],
   warnings: [],
 }) as unknown as MockFn;
+const autoMigrateLegacyPluginDoctorState = vi.fn().mockResolvedValue({
+  migrated: false,
+  skipped: false,
+  changes: [],
+  warnings: [],
+}) as unknown as MockFn;
 const autoMigrateLegacyTaskStateSidecars = vi.fn().mockResolvedValue({
   migrated: false,
   skipped: false,
@@ -209,6 +215,13 @@ function createLegacyStateMigrationDetectionResult(params?: {
       targetStorePath: "/tmp/state/agents/main/sessions/sessions.json",
       hasLegacy: params?.hasLegacySessions ?? false,
       legacyKeys: [],
+      preserveAmbiguousKeys: false,
+      preserveForeignMainAliases: false,
+      targetStoreAliases: {
+        hasDistinctAliases: false,
+        hasFinalSymlink: false,
+        hasUnresolvedIdentity: false,
+      },
     },
     agentDir: {
       legacyDir: "/tmp/state/agent",
@@ -221,6 +234,11 @@ function createLegacyStateMigrationDetectionResult(params?: {
     },
     pluginInstallIndex: {
       sourcePath: "/tmp/state/plugins/installs.json",
+      hasLegacy: false,
+    },
+    debugProxyCaptureSidecar: {
+      sourcePath: "/tmp/state/debug-proxy/capture.sqlite",
+      blobDir: "/tmp/state/debug-proxy/blobs",
       hasLegacy: false,
     },
     stateSchema: {
@@ -237,6 +255,27 @@ function createLegacyStateMigrationDetectionResult(params?: {
       sessionPath: "/tmp/state/session-delivery-queue",
       hasLegacy: false,
     },
+    voiceWake: {
+      triggersPath: "/tmp/state/settings/voicewake.json",
+      routingPath: "/tmp/state/settings/voicewake-routing.json",
+      hasLegacy: false,
+    },
+    updateCheck: {
+      sourcePath: "/tmp/state/update-check.json",
+      hasLegacy: false,
+    },
+    configHealth: {
+      sourcePath: "/tmp/state/logs/config-health.json",
+      hasLegacy: false,
+    },
+    pluginBindingApprovals: {
+      sourcePath: "/tmp/state/plugin-binding-approvals.json",
+      hasLegacy: false,
+    },
+    currentConversationBindings: {
+      sourcePath: "/tmp/state/bindings/current-conversations.json",
+      hasLegacy: false,
+    },
     execApprovals: {
       sourcePath: "/tmp/state/exec-approvals.legacy.json",
       targetPath: "/tmp/state/exec-approvals.json",
@@ -246,6 +285,8 @@ function createLegacyStateMigrationDetectionResult(params?: {
       hasLegacy: false,
       plans: [],
     },
+    warnings: [],
+    notices: [],
     preview: params?.preview ?? [],
   };
 }
@@ -488,6 +529,7 @@ vi.mock("./onboard-helpers.js", () => ({
 }));
 
 vi.mock("./doctor-state-migrations.js", () => ({
+  autoMigrateLegacyPluginDoctorState,
   autoMigrateLegacyState,
   autoMigrateLegacyStateDir,
   autoMigrateLegacyTaskStateSidecars,
